@@ -37,6 +37,10 @@ mem_alias	0xB8000000
 mem_stack	0x10000000
 app_pool	0xCD500000
 
+# ---- Graphics ----
+# Decode BC textures on CPU for A15/A16 GPUs.
+tex_bc_cpu	on
+
 # ---- Shader split (shader_split.py) ----
 # source groups: a path containing the first part goes to the second group (first match wins; shaders embedded in main always go to main, no match goes to other)
 shader_groups	/Shader/SecredUber=SecredUber .sharcb=agl /Effect/=effect /Layout/=layout /Shader/=SecredUber
