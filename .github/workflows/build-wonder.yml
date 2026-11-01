@@ -26,13 +26,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check runner architecture and Xcode
+      - name: Check runner architecture, Xcode and disk space
         run: |
           echo "Architecture: $(uname -m)"
           echo "Xcode:"
           xcodebuild -version
           echo "Disk space:"
           df -h "$RUNNER_TEMP"
+
+          AVAILABLE_GB=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print int($4/1024/1024)}')
+          echo "Available space: ${AVAILABLE_GB} GB"
+
+          if [ "$AVAILABLE_GB" -lt 30 ]; then
+            echo "::error::Insufficient disk space. At least 30 GB is required."
+            exit 1
+          fi
+
           test "$(uname -m)" = "arm64" || {
             echo "::error::This build requires an ARM64 runner."
             exit 1
