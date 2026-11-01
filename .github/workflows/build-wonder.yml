@@ -1,0 +1,185 @@
+
+name: Build Super Mario Bros. Wonder IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-wonder
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Download private game files and build IPA
+    runs-on: xcode-27
+    timeout-minutes: 360
+
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Check runner architecture and Xcode
+        run: |
+          echo "Architecture: $(uname -m)"
+          echo "Xcode:"
+          xcodebuild -version
+          echo "Disk space:"
+          df -h "$RUNNER_TEMP"
+          test "$(uname -m)" = "arm64" || {
+            echo "::error::This build requires an ARM64 runner."
+            exit 1
+          }
+
+      - name: Install Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.14'
+
+      - name: Install build dependencies
+        run: |
+          brew install xcodegen zstd glslang
+          curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$RUNNER_TEMP/dotnet-install.sh"
+          bash "$RUNNER_TEMP/dotnet-install.sh" --channel 10.0 --install-dir "$RUNNER_TEMP/dotnet"
+          echo "DOTNET_ROOT=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/dotnet" >> "$GITHUB_PATH"
+          python -m pip install lz4 "capstone>=5,<6" fonttools google-auth requests
+
+      - name: Download private files from Google Drive
+        env:
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import requests
+          from google.oauth2.service_account import Credentials
+          from google.auth.transport.requests import AuthorizedSession
+
+          folder_id = os.environ["GDRIVE_FOLDER_ID"]
+          info = json.loads(os.environ["GDRIVE_SERVICE_ACCOUNT_JSON"])
+
+          credentials = Credentials.from_service_account_info(
+              info,
+              scopes=["https://www.googleapis.com/auth/drive.readonly"]
+          )
+          session = AuthorizedSession(credentials)
+
+          folder = pathlib.Path(os.environ["RUNNER_TEMP"]) / "SMBW-input"
+          keys_dir = pathlib.Path(os.environ["RUNNER_TEMP"]) / "SMBW-keys"
+          folder.mkdir(parents=True, exist_ok=True)
+          keys_dir.mkdir(parents=True, exist_ok=True)
+
+          required = {
+              "SMBW-base-1.0.0.nsp": folder / "Super Mario Bros. Wonder [010015100B514000][v0].nsp",
+              "SMBW-update-1.0.1.nsp": folder / "Super Mario Bros. Wonder [010015100B514800][v65536].nsp",
+              "prod.keys": keys_dir / "prod.keys",
+          }
+
+          files = {}
+          page_token = None
+
+          while True:
+              params = {
+                  "q": f"'{folder_id}' in parents and trashed=false",
+                  "fields": "nextPageToken,files(id,name,size,mimeType)",
+                  "pageSize": 100,
+                  "supportsAllDrives": "true",
+                  "includeItemsFromAllDrives": "true",
+              }
+              if page_token:
+                  params["pageToken"] = page_token
+
+              response = session.get(
+                  "https://www.googleapis.com/drive/v3/files",
+                  params=params,
+                  timeout=60
+              )
+              response.raise_for_status()
+              data = response.json()
+
+              for item in data.get("files", []):
+                  files[item["name"]] = item
+
+              page_token = data.get("nextPageToken")
+              if not page_token:
+                  break
+
+          for name, destination in required.items():
+              if name not in files:
+                  raise SystemExit(f"Missing required Drive file: {name}")
+
+              item = files[name]
+              print(f"Downloading {name} ({item.get('size', 'unknown')} bytes)")
+              url = f"https://www.googleapis.com/drive/v3/files/{item['id']}"
+
+              with session.get(
+                  url,
+                  params={"alt": "media", "supportsAllDrives": "true"},
+                  stream=True,
+                  timeout=(60, 300)
+              ) as response:
+                  response.raise_for_status()
+                  size = 0
+                  with destination.open("wb") as output:
+                      for chunk in response.iter_content(chunk_size=8 * 1024 * 1024):
+                          if chunk:
+                              output.write(chunk)
+                              size += len(chunk)
+
+              expected = int(item.get("size", size))
+              if size != expected or size == 0:
+                  raise SystemExit(
+                      f"Size verification failed for {name}: {size} vs {expected}"
+                  )
+
+              print(f"Verified {name}: {size} bytes")
+
+          print("All three private files downloaded and verified.")
+          PY
+
+      - name: Verify game profile and input files
+        run: |
+          test -f "$RUNNER_TEMP/SMBW-input/Super Mario Bros. Wonder [010015100B514000][v0].nsp"
+          test -f "$RUNNER_TEMP/SMBW-input/Super Mario Bros. Wonder [010015100B514800][v65536].nsp"
+          test -f "$RUNNER_TEMP/SMBW-keys/prod.keys"
+          grep -q 'tex_bc_cpu' dm/games/010015100B514000/game.tsv
+          echo "Mario Wonder profile and BC CPU patch found."
+
+      - name: Build unsigned iOS IPA
+        run: |
+          python scripts/build_ipa_from_nsp.py \
+            "$RUNNER_TEMP/SMBW-input" \
+            -k "$RUNNER_TEMP/SMBW-keys/prod.keys" \
+            --package v65536 \
+            --gpu none \
+            --no-keep-extracted \
+            --work-dir "$RUNNER_TEMP/SMBW-build" \
+            -o "$RUNNER_TEMP/SMBWMobile.ipa" \
+            --progress lines
+
+      - name: Verify IPA
+        run: |
+          test -s "$RUNNER_TEMP/SMBWMobile.ipa"
+          file "$RUNNER_TEMP/SMBWMobile.ipa"
+          ls -lh "$RUNNER_TEMP/SMBWMobile.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: Super-Mario-Bros-Wonder-IPA
+          path: ${{ runner.temp }}/SMBWMobile.ipa
+          if-no-files-found: error
+          retention-days: 3
