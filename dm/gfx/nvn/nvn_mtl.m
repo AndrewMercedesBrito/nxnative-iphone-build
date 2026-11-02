@@ -4550,6 +4550,19 @@ static id<MTLTexture> tex_by_id(int tid) {   // Caller holds g_rmu
             if (!fits) RED_ONCE(110, "cube texture view of %u + %u layers past the %lu faces of texture ID %d: read as a 2D array", (unsigned)s0, (unsigned)ns, (unsigned long)total, tid);
             if (fits) { s0 *= 6; ns *= 6; } else tt = MTLTextureType2DArray;
         }
+        if (pf == MTLPixelFormatInvalid ||
+            base.pixelFormat == MTLPixelFormatInvalid) {
+            MLOG("[TEX-DIAG] INVALID FORMAT: tid=%d NVN_view=%#x NVN_base=%#x set_format=%d pf=%u base_pf=%lu usage=%lu type=%lu serial=%llu",
+                 tid,
+                 (unsigned)r.v.format,
+                 (unsigned)r.t.d.format,
+                 r.v.set_format,
+                 (unsigned)pf,
+                 (unsigned long)base.pixelFormat,
+                 (unsigned long)base.usage,
+                 (unsigned long)base.textureType,
+                 (unsigned long long)rp->t.serial);
+        }
         vc_key k; memset(&k, 0, sizeof k); k.pf = pf; k.tt = (uint8_t)tt; k.l0 = (uint32_t)l0; k.nl = (uint32_t)nl; k.s0 = (uint32_t)s0; k.ns = (uint32_t)ns; memcpy(k.sw, sw, 4);
         if (!(v = vc_get(rp->t.serial, &k, base))) {
             v = need_sw ? [base newTextureViewWithPixelFormat:(MTLPixelFormat)pf textureType:tt levels:NSMakeRange(l0, nl) slices:NSMakeRange(s0, ns) swizzle:MTLTextureSwizzleChannelsMake(sw[0], sw[1], sw[2], sw[3])]
