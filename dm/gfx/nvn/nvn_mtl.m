@@ -4527,8 +4527,8 @@ static id<MTLTexture> tex_by_id(int tid) {   // Caller holds g_rmu
         // When the NVN view keeps the original BC format, view the actual
         // backing format instead; retain the NVN swizzle computed above.
         uint32_t bc_view_unpacked = 0; int bc_view_bpp = 0;
-        if (r.v.set_format && g_bc_cpu && r.v.format == rp->t.d.format &&
-            nvn_bc_unpacked(rp->t.d.format, &bc_view_unpacked, &bc_view_bpp))
+        if (r.v.set_format && g_bc_cpu && r.v.format == r.t.d.format &&
+            nvn_bc_unpacked(r.t.d.format, &bc_view_unpacked, &bc_view_bpp))
             pf = (uint32_t)base.pixelFormat;
         if (stv) pf = MTLPixelFormatX32_Stencil8;
         if (r.v.set_format && nvn_fmt_bc(rp->t.d.format) && !nvn_fmt_bc(r.v.format)) {   // the raw blocks of a BC texture through an uncompressed view (see rt_view_fmt): Metal has no such view
