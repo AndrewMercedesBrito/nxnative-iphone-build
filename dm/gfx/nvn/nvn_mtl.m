@@ -4523,6 +4523,13 @@ static id<MTLTexture> tex_by_id(int tid) {   // Caller holds g_rmu
         if (!r.has_v) memset(&r.v, 0, sizeof r.v);
         uint32_t pf = (uint32_t)base.pixelFormat; uint8_t swz[4];
         if (r.v.set_format && !(nvn_fmt_to_mtl(r.v.format, &pf, swz) && pf)) pf = (uint32_t)base.pixelFormat;
+        // CPU-decoded BC textures use an unpacked Metal backing format.
+        // When the NVN view keeps the original BC format, view the actual
+        // backing format instead; retain the NVN swizzle computed above.
+        uint32_t bc_view_unpacked = 0; int bc_view_bpp = 0;
+        if (r.v.set_format && g_bc_cpu && r.v.format == rp->t.d.format &&
+            nvn_bc_unpacked(rp->t.d.format, &bc_view_unpacked, &bc_view_bpp))
+            pf = (uint32_t)base.pixelFormat;
         if (stv) pf = MTLPixelFormatX32_Stencil8;
         if (r.v.set_format && nvn_fmt_bc(rp->t.d.format) && !nvn_fmt_bc(r.v.format)) {   // the raw blocks of a BC texture through an uncompressed view (see rt_view_fmt): Metal has no such view
             RED_ONCE(86, "Metal cannot create the raw-block view of a compressed texture (NVN format %#x → view %#x): treated as an empty slot", rp->t.d.format, r.v.format);
