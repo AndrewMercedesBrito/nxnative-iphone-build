@@ -2385,6 +2385,8 @@ static id<MTLTexture> pkg_upload_(const tex_t *t, uint64_t *stamp, id<MTLTexture
     int bc_cpu = g_bc_cpu && nvn_bc_unpacked(t->d.format, &bc_pf, &bc_bpp);
     size_t total_bc = 0;
     if (bc_cpu) {
+        MLOG("BC CPU texture: format=%#x size=%ux%u depth=%u layers=%u mips=%u",
+             t->d.format, t->d.width, t->d.height, t->d.depth, layers, d.mipmapLevelCount);
         total_bc = 0;
         for (unsigned l = 0; l < d.mipmapLevelCount; l++) {
             uint32_t w = MAX(t->d.width >> l, 1u), h = MAX(t->d.height >> l, 1u), z = t->d.target == 2 ? MAX(t->d.depth >> l, 1u) : 1;
